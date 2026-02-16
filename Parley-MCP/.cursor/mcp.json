@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "parley-mcp": {
+      "command": "python",
+      "args": ["run_server.py"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

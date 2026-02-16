@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "corellium-mcp": {
+      "command": "python",
+      "args": ["-m", "corellium_mcp.server"],
+      "env": {
+        "CORELLIUM_API_ENDPOINT": "",
+        "CORELLIUM_API_TOKEN": ""
+      }
+    },
+    "parley-mcp": {
+      "command": "python",
+      "args": ["Parley-MCP/run_server.py"]
+    }
+  }
+}

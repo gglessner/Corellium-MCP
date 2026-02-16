@@ -1,0 +1,4 @@
+mcp>=1.0.0
+
+# Optional: only needed if using ISO 8583 payment message modules
+# iso8583
