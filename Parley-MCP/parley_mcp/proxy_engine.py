@@ -22,11 +22,67 @@ this program. If not, see <https://www.gnu.org/licenses/>.
 
 import socket
 import ssl
+import struct
 import threading
 import select
 import traceback
 import sys
 from typing import Dict, Any, Optional
+
+
+def _detect_websocket_upgrade(data: bytes) -> bool:
+    """Check if HTTP data contains a WebSocket upgrade request/response."""
+    try:
+        text = data.decode("utf-8", errors="replace").lower()
+        return "upgrade: websocket" in text
+    except Exception:
+        return False
+
+
+def _parse_ws_frame(data: bytes) -> list:
+    """Parse WebSocket frames from raw data. Returns list of (opcode, payload, is_masked)."""
+    frames = []
+    offset = 0
+    while offset < len(data):
+        if offset + 2 > len(data):
+            break
+        b0 = data[offset]
+        b1 = data[offset + 1]
+        opcode = b0 & 0x0F
+        masked = bool(b1 & 0x80)
+        payload_len = b1 & 0x7F
+        offset += 2
+
+        if payload_len == 126:
+            if offset + 2 > len(data):
+                break
+            payload_len = struct.unpack("!H", data[offset:offset + 2])[0]
+            offset += 2
+        elif payload_len == 127:
+            if offset + 8 > len(data):
+                break
+            payload_len = struct.unpack("!Q", data[offset:offset + 8])[0]
+            offset += 8
+
+        mask_key = None
+        if masked:
+            if offset + 4 > len(data):
+                break
+            mask_key = data[offset:offset + 4]
+            offset += 4
+
+        if offset + payload_len > len(data):
+            payload_len = len(data) - offset
+
+        payload = bytearray(data[offset:offset + payload_len])
+        if masked and mask_key:
+            for i in range(len(payload)):
+                payload[i] ^= mask_key[i % 4]
+
+        frames.append((opcode, bytes(payload), masked))
+        offset += payload_len
+
+    return frames
 
 
 class ProxyInstance:
@@ -122,9 +178,28 @@ class ProxyInstance:
             self._active_connections += 1
 
         try:
-            # Connect to target server
+            # Connect to target server (optionally via upstream proxy)
             forward_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            forward_socket.connect((cfg['target_host'], cfg['target_port']))
+            upstream = cfg.get('upstream_proxy')
+            if upstream:
+                forward_socket.connect((upstream['host'], upstream['port']))
+                connect_req = (
+                    f"CONNECT {cfg['target_host']}:{cfg['target_port']} HTTP/1.1\r\n"
+                    f"Host: {cfg['target_host']}:{cfg['target_port']}\r\n"
+                    "\r\n"
+                ).encode()
+                forward_socket.sendall(connect_req)
+                resp = b""
+                while b"\r\n\r\n" not in resp:
+                    chunk = forward_socket.recv(4096)
+                    if not chunk:
+                        raise OSError("Upstream proxy closed during CONNECT")
+                    resp += chunk
+                status_line = resp.split(b"\r\n")[0]
+                if b"200" not in status_line:
+                    raise OSError(f"Upstream proxy CONNECT failed: {status_line!r}")
+            else:
+                forward_socket.connect((cfg['target_host'], cfg['target_port']))
 
             client_ip, client_port = client_socket.getpeername()
             server_ip, server_port = forward_socket.getpeername()
@@ -178,6 +253,7 @@ class ProxyInstance:
             buffer_size = 65536
             client_msg_num = 0
             server_msg_num = 0
+            _ws_mode = False
 
             while sockets_list and not self._stop_event.is_set():
                 readable, _, _ = select.select(sockets_list, [], [], 1.0)
@@ -197,6 +273,9 @@ class ProxyInstance:
                             break
 
                     if full_data:
+                        if not _ws_mode and _detect_websocket_upgrade(bytes(full_data)):
+                            _ws_mode = True
+
                         if s is client_socket:
                             # Client -> Server
                             client_msg_num += 1

@@ -1,22 +1,21 @@
 # Corellium-MCP + Parley-MCP
 
-Version: 1.0.0
+Version: 1.1.0
 
-**AI-driven mobile penetration testing** combining [Corellium](https://www.corellium.com/) virtual device control with [Parley-MCP](https://github.com/gglessner/Parley-MCP) active traffic interception — both orchestrated by an AI agent through the Model Context Protocol.
+**AI-driven mobile penetration testing** combining [Corellium](https://www.corellium.com/) virtual device control, [Parley-MCP](https://github.com/gglessner/Parley-MCP) active traffic interception, and Analysis-MCP forensic data decoding — all orchestrated by an AI agent through the Model Context Protocol.
 
 ## Why This Combination Is Devastating
 
-Traditional mobile pentesting tools operate in isolation. You capture traffic with Burp, inspect files with objection, trace syscalls with Frida — all manually, all disconnected. This repo gives an AI agent **simultaneous programmatic control over both the network layer and the device internals**, creating a closed-loop automated attack platform.
+Traditional mobile pentesting tools operate in isolation. You capture traffic with Burp, inspect files with objection, trace syscalls with Frida — all manually, all disconnected. This repo gives an AI agent **simultaneous programmatic control over the network layer, the device internals, and forensic data analysis**, creating a closed-loop automated attack platform.
 
-| Layer | Parley-MCP | Corellium-MCP |
-|-------|-----------|---------------|
-| **Network/API** | Active MITM — intercept, rewrite, inject, search all traffic in real time | Passive PCAP download for offline analysis |
-| **Application** | Sees HTTP/TLS protocol data, headers, cookies, tokens, payloads | Sees app behavior — filesystem writes, syscalls, crashes, kernel panics |
-| **Control** | Modify what the app **receives** from its backend | Modify what the app **contains** on the device (files, hooks, configs) |
-| **Persistence** | All traffic captured to SQLite — queryable by the AI | Full device snapshots — restore to any previous state instantly |
-| **Automation** | AI writes Python modules that process every byte of traffic | AI orchestrates MATRIX automated security assessments |
+| Layer | Parley-MCP | Corellium-MCP | Analysis-MCP |
+|-------|-----------|---------------|--------------|
+| **Network** | Active MITM — intercept, rewrite, search, scan, replay traffic; auto-cert CA for full TLS MITM; upstream proxy chaining | Passive PCAP download, Network Monitor with auto SSL bypass | — |
+| **Application** | HTTP request/scan/replay tools; WebSocket detection; structured HTTP parsing | Sees app internals — filesystem, syscalls, crashes, panics; SSH shell access for FRIDA/objection/keychain-dumper | — |
+| **Data** | Cookie jar management; HAR export for Burp/ZAP interop; pre-built security modules | Raw base64 file downloads; CoreTrace data retrieval with PID filtering | Decode AND encode plists, cookies, JWTs, provisioning profiles, SQLite, AEP configs, keychain dumps, Akamai sensor data, screenshot metadata |
+| **Control** | Modify what the app **receives** from its backend; replay/scan endpoints directly | Modify what the app **contains** on the device; inject touch/keyboard input for UI automation | Parse, analyze, AND re-encode what the app **stores** (download → decode → modify → encode → upload) |
 
-**The key insight**: Parley lets the AI *cause* things (tamper with API traffic), and Corellium lets the AI *observe* the consequences (how the app reacts internally). No other toolchain gives an AI agent this level of autonomous, bidirectional control over a mobile pentest.
+**The key insight**: Parley lets the AI *cause* things (tamper with API traffic, send HTTP requests, scan endpoints). Corellium lets the AI *observe* and *extract* (how the app reacts internally, raw file downloads, CoreTrace syscall data). Analysis-MCP lets the AI *understand* and *re-encode* extracted data (decode proprietary formats, modify, encode back for upload). Together: closed-loop automated testing.
 
 ## The Killer Workflows
 
@@ -41,35 +40,37 @@ The AI can autonomously: create a Parley rewriting module → exercise the app o
 ## Architecture
 
 ```
-+------------------+
-|    AI Agent      |  Orchestrates both MCPs simultaneously
-|    (Cursor)      |
-+--------+---------+
++-------------------+
+|     AI Agent      |  Orchestrates all three MCPs simultaneously
+|     (Cursor)      |
++--------+----------+
          |
     MCP Protocol
          |
-+--------+---------+---------------------------+
-|                  |                           |
-|  Corellium-MCP   |      Parley-MCP           |
-|  (60 tools)      |      (15 tools)           |
-|                  |                           |
-|  Virtual Device  |   TCP/TLS Proxy Engine    |
-|  Management      |   + Python Module System  |
-|  App Lifecycle   |   + SQLite Traffic DB     |
-|  Filesystem I/O  |   + Bidirectional Rewrite |
-|  CoreTrace       |                           |
-|  MATRIX Assess.  |                           |
-|  Hypervisor Hooks|                           |
-+--------+---------+-----------+---------------+
-         |                     |
-         v                     v
-+------------------+   +------------------+
-| Corellium Cloud  |   | Target Backend   |
-| Virtual Device   |<->| API Server       |
-| (iOS / Android)  |   |                  |
-+------------------+   +------------------+
-  Mobile App Traffic -----> Parley Proxy -----> Backend
-  (routed via proxy)       (intercept/rewrite)
++--------+----------+------------------+------------------+
+|                   |                  |                  |
+|  Corellium-MCP    |   Parley-MCP     |  Analysis-MCP    |
+|  (68+ tools)      |   (25 tools)     |  (15 tools)      |
+|                   |                  |                  |
+|  Virtual Device   |  TCP/TLS Proxy   |  Plist decode/   |
+|  Management       |  + Python Mods   |    encode        |
+|  App Lifecycle    |  + SQLite DB     |  Cookie parser   |
+|  Filesystem I/O   |  + HTTP Tools    |  JWT decoder     |
+|  SSH Shell Access |  + Auto-Cert CA  |  SQLite analyzer |
+|  CoreTrace        |  + Cookie Jar    |  Provisioning    |
+|  MATRIX Assess.   |  + HAR Export    |    profiles      |
+|  Hypervisor Hooks |  + Replay/Scan   |  Keychain dumps  |
+|  UI Automation    |                  |  Screenshot meta |
++--------+----------+--------+---------+------------------+
+         |                   |
+         v                   v
++------------------+  +------------------+
+| Corellium Cloud  |  | Target Backend   |
+| Virtual Device   |<>| API Server       |
+| (iOS / Android)  |  |                  |
++------------------+  +------------------+
+  Mobile App Traffic ----> Parley Proxy ----> Backend
+  (routed via proxy)      (intercept/rewrite)
 ```
 
 ## Combined Workflow Example
@@ -137,13 +138,19 @@ corellium_disconnect()
 ```
 Corellium-MCP/
 ├── README.md                        # This file
-├── requirements.txt                 # Corellium-MCP dependencies
-├── corellium_mcp/                   # Corellium MCP server (60 tools)
+├── MCP_SETUP.md                     # Detailed setup instructions
+├── requirements.txt                 # Corellium-MCP + Analysis-MCP dependencies
+├── LICENSE                          # GNU General Public License v3
+├── corellium_mcp/                   # Corellium MCP server (68+ tools)
 │   ├── __init__.py
 │   ├── __main__.py
 │   ├── client.py                    #   REST API client (httpx)
 │   └── server.py                    #   MCP tool definitions
-├── Parley-MCP/                      # Parley MCP server (15 tools)
+├── analysis_mcp/                    # Analysis MCP server (15 tools)
+│   ├── __init__.py
+│   ├── __main__.py
+│   └── server.py                    #   Forensic decoding/encoding tools
+├── Parley-MCP/                      # Parley MCP server (25 tools)
 │   ├── run_server.py                #   Entry point
 │   ├── requirements.txt             #   Parley dependencies
 │   ├── README.md                    #   Full Parley documentation
@@ -154,7 +161,7 @@ Corellium-MCP/
 │       ├── module_manager.py        #     Dynamic Python module system
 │       └── module_libs/             #     Protocol libraries (JWT, HTTP, etc.)
 └── .cursor/
-    ├── mcp.json                     # Both servers configured
+    ├── mcp.json                     # All three servers configured
     └── skills/
         └── corellium-mcp/
             ├── SKILL.md             # Pentesting methodology + tool guide
@@ -184,7 +191,7 @@ Set your Corellium credentials in `.cursor/mcp.json`:
   "mcpServers": {
     "corellium-mcp": {
       "command": "python",
-      "args": ["-m", "corellium_mcp.server"],
+      "args": ["-m", "corellium_mcp"],
       "env": {
         "CORELLIUM_API_ENDPOINT": "https://app.corellium.com/api",
         "CORELLIUM_API_TOKEN": "your-token-here"
@@ -193,6 +200,10 @@ Set your Corellium credentials in `.cursor/mcp.json`:
     "parley-mcp": {
       "command": "python",
       "args": ["Parley-MCP/run_server.py"]
+    },
+    "analysis-mcp": {
+      "command": "python",
+      "args": ["-m", "analysis_mcp"]
     }
   }
 }
@@ -200,44 +211,63 @@ Set your Corellium credentials in `.cursor/mcp.json`:
 
 Or set environment variables `CORELLIUM_API_ENDPOINT` and `CORELLIUM_API_TOKEN`.
 
+See [MCP_SETUP.md](MCP_SETUP.md) for detailed setup instructions.
+
 ## Tool Inventory
 
-### Corellium-MCP (60 tools)
+### Corellium-MCP (68+ tools)
 
 | Category | Count | Highlights |
 |----------|-------|------------|
 | Connection | 3 | Connect, disconnect, list connections |
 | Projects | 2 | List and inspect projects |
 | Models | 2 | Browse device models and firmware versions |
-| Instances | 13 | Create/start/stop/reboot/pause/delete, screenshot, console log |
+| Instances | 13 | Create/start/stop/reboot/pause/delete, screenshot, console log, agent ready |
 | Apps | 5 | Install, uninstall, run, kill, enumerate |
-| Files | 3 | Upload, download, delete on jailbroken/rooted filesystem |
+| Files | 5 | Upload, download, delete, list on jailbroken/rooted filesystem; find app data container by bundle ID |
 | Snapshots | 4 | Create, list, restore, delete |
-| Network | 2 | PCAP capture download, network info |
+| Network | 4 | Start/stop network monitor, PCAP capture download, network info |
+| SSH | 1 | Execute shell commands via paramiko (keychain-dumper, FRIDA, objection, app launch) |
+| UI Automation | 1 | Inject touch, keyboard, and text input events |
 | MATRIX | 7 | Full automated security assessment pipeline |
 | Hooks | 5 | Hypervisor-level execution hooks |
-| CoreTrace | 3 | Hypervisor-level syscall tracing |
-| System | 7 | Lock/unlock, properties, peripherals, panics |
+| CoreTrace | 4 | Start, stop, get (with PID filter), clear hypervisor-level syscall tracing |
+| System | 9 | Lock/unlock, properties, peripherals, panics, hostname, shutdown |
 | Ports | 2 | Expose SSH (22), FRIDA (27042), ADB (5555) |
 | Profiles | 3 | iOS configuration profile management |
 
-### Parley-MCP (15 tools)
+### Parley-MCP (25 tools)
 
 | Category | Count | Highlights |
 |----------|-------|------------|
 | Web Proxy | 1 | One-call TLS-decrypting proxy with full HTTP rewriting |
-| Proxy Lifecycle | 4 | Start, stop, list, status |
-| Module Management | 5 | Create/update/delete/enable/list Python rewriting modules |
-| Traffic Analysis | 5 | Query, summary, connections, clear, search captured traffic |
+| Proxy Lifecycle | 4 | Start (with auto-cert, upstream proxy), stop, list, status |
+| Module Management | 6 | Create/update/delete/enable/list Python rewriting modules; deploy pre-built security templates |
+| Traffic Analysis | 7 | Query (HTTP decode), summary, connections, clear, search, export (HAR), replay |
+| HTTP Tools | 2 | Direct HTTP request through proxy with cookie jar; multi-path endpoint scanning |
+| Certificates | 1 | Generate MITM root CA (per-host certs auto-generated) |
+| Cookie Jar | 2 | Show and clear automatic cross-request cookie persistence |
 
-**75 tools total** for comprehensive AI-driven mobile penetration testing.
+### Analysis-MCP (15 tools)
+
+| Category | Count | Highlights |
+|----------|-------|------------|
+| Plist/Config | 3 | Decode binary/XML plists, encode JSON to plist, decode provisioning profiles |
+| Data Formats | 4 | Decode base64 JSON, iOS binary cookies, JWTs, Adobe AEP configs |
+| Binary Analysis | 3 | Extract strings with keyword filtering, binary search, SQLite schema + string extraction |
+| Keychain | 1 | Parse iOS keychain-dumper output with security analysis |
+| Anti-Bot | 1 | Decode Akamai BMP sensor payloads |
+| Screenshots | 1 | Analyze PNG/JPEG metadata for SplashBoard data leakage |
+| File Utility | 1 | Save base64-encoded data (screenshots, binaries, databases) to local files |
+
+**108+ tools total** for comprehensive AI-driven mobile penetration testing.
 
 ## Cursor Skill
 
-The skill at `.cursor/skills/corellium-mcp/` teaches the AI agent the complete pentesting methodology:
+The skill at `.cursor/skills/corellium-mcp/` teaches the AI agent the complete pentesting methodology across all three MCPs:
 
-- **SKILL.md** — 8-phase OWASP-aligned workflow, Mobile Top 10 tool mapping, Parley+Corellium integration patterns
-- **pentest-reference.md** — iOS/Android filesystem paths, MASTG test mapping, MATRIX categories, CoreTrace patterns, FRIDA targets, Parley module examples
+- **SKILL.md** — 8-phase OWASP-aligned workflow, Mobile Top 10 tool mapping, three-MCP integration patterns, 55 critical rules from real-world testing
+- **pentest-reference.md** — iOS/Android filesystem paths, MASTG test mapping, MATRIX categories, CoreTrace patterns, Core Data analysis, FRIDA targets, Parley module examples, 20+ high-yield finding patterns
 
 ## Author
 
@@ -246,6 +276,7 @@ Garland Glessner — [gglessner@gmail.com](mailto:gglessner@gmail.com)
 ## Credits
 
 - **Corellium-MCP** — Corellium REST API integration for virtual device management
+- **Analysis-MCP** — Mobile forensics data decoding, encoding, and analysis toolkit
 - **[Parley-MCP](https://github.com/gglessner/Parley-MCP)** — AI-controlled TCP/TLS penetration testing proxy by [Garland Glessner](https://github.com/gglessner)
 - Based on [Parley](https://github.com/gglessner/Parley) by Garland Glessner
 

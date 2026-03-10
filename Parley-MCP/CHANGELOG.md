@@ -4,6 +4,41 @@ All notable changes to Parley-MCP will be documented in this file.
 
 ---
 
+## [1.1.0] - 2026-02-16
+
+### Added
+- **`http_request` tool** — send structured HTTP requests through a running proxy
+  instance with automatic cookie jar management, eliminating raw socket scripting
+- **`http_scan` tool** — automated multi-path endpoint scanning with status codes,
+  response sizes, server headers, and security header presence summary table
+- **`traffic_replay` tool** — replay previously captured client requests through the
+  proxy with optional header and body modifications for iterative testing
+- **`traffic_export` tool** — export captured traffic to HAR 1.2 format for import
+  into Burp Suite, OWASP ZAP, Chrome DevTools, or other security tools
+- **`cert_generate_ca` tool** — generate a self-signed root CA for full MITM TLS
+  interception; per-host certificates auto-generated on demand
+- **`module_deploy_template` tool** — deploy pre-built security modules from template
+  library (security_header_audit, cors_tester, auth_token_extractor, response_scanner,
+  request_logger)
+- **`cookie_jar_show` / `cookie_jar_clear` tools** — inspect and manage the automatic
+  cookie jar that persists cookies across `http_request` calls
+- **`auto_cert` parameter** on `proxy_start` — auto-generate TLS certificates for
+  client-side MITM using the Parley CA (requires `cryptography` package)
+- **`upstream_proxy` parameter** on `proxy_start` — route proxy connections through
+  an upstream HTTP CONNECT proxy for proxy chaining
+- **`decode_as="http"` option** on `traffic_query` — structured HTTP parsing that
+  separates request/response lines, headers, and body with content-type awareness
+- **WebSocket detection and frame parsing** in proxy engine — automatically detects
+  WebSocket upgrade handshakes and parses WS frames for logging
+- **`cert_manager.py`** — new module for CA lifecycle and per-host cert generation
+  using the `cryptography` library (optional dependency, graceful fallback)
+
+### Changed
+- Version bumped to 1.1.0
+- Proxy engine now supports HTTP CONNECT tunneling for upstream proxy chaining
+
+---
+
 ## [1.0.1] - 2026-02-15
 
 ### Added

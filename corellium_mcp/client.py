@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import httpx
 from typing import Any
+from urllib.parse import quote as _url_quote
 
 
 class CorelliumClient:
@@ -225,6 +226,28 @@ class CorelliumClient:
         return await self._request(
             "POST",
             f"/v1/instances/{instance_id}/agent/v1/app/apps/{bundle_id}/kill",
+            json={},
+        )
+
+    async def disable_ssl_pinning(self, instance_id: str) -> dict:
+        return await self._request(
+            "PUT",
+            f"/v1/instances/{instance_id}/agent/v1/system/ssl-pinning/disable",
+            json={},
+        )
+
+    async def enable_ssl_pinning(self, instance_id: str) -> dict:
+        return await self._request(
+            "PUT",
+            f"/v1/instances/{instance_id}/agent/v1/system/ssl-pinning/enable",
+            json={},
+        )
+
+    async def shell_exec(self, instance_id: str, command: str) -> dict:
+        return await self._request(
+            "POST",
+            f"/v1/instances/{instance_id}/agent/v1/system/exec",
+            json={"cmd": command},
         )
 
     async def install_app(self, instance_id: str, path: str) -> dict:
@@ -246,7 +269,15 @@ class CorelliumClient:
     # Agent – files
     # ------------------------------------------------------------------
 
+    async def list_files(self, instance_id: str, dir_path: str) -> list[dict]:
+        dir_path = _url_quote(dir_path.lstrip("/"), safe="/")
+        return await self._request(
+            "GET",
+            f"/v1/instances/{instance_id}/agent/v1/file/device/{dir_path}",
+        )
+
     async def download_file(self, instance_id: str, file_path: str) -> bytes:
+        file_path = _url_quote(file_path.lstrip("/"), safe="/")
         return await self._request(
             "GET",
             f"/v1/instances/{instance_id}/agent/v1/file/device/{file_path}",
@@ -256,6 +287,7 @@ class CorelliumClient:
     async def upload_file(
         self, instance_id: str, file_path: str, data: bytes
     ) -> dict:
+        file_path = _url_quote(file_path.lstrip("/"), safe="/")
         return await self._request(
             "PUT",
             f"/v1/instances/{instance_id}/agent/v1/file/device/{file_path}",
@@ -264,6 +296,7 @@ class CorelliumClient:
         )
 
     async def delete_file(self, instance_id: str, file_path: str) -> dict:
+        file_path = _url_quote(file_path.lstrip("/"), safe="/")
         return await self._request(
             "DELETE",
             f"/v1/instances/{instance_id}/agent/v1/file/device/{file_path}",
@@ -352,6 +385,18 @@ class CorelliumClient:
             raw_response=True,
         )
 
+    async def start_network_monitor(self, instance_id: str) -> dict:
+        return await self._request(
+            "POST",
+            f"/v1/instances/{instance_id}/sslsplit/enable",
+        )
+
+    async def stop_network_monitor(self, instance_id: str) -> dict:
+        return await self._request(
+            "POST",
+            f"/v1/instances/{instance_id}/sslsplit/disable",
+        )
+
     async def download_network_monitor_pcap(
         self, instance_id: str
     ) -> bytes:
@@ -379,6 +424,19 @@ class CorelliumClient:
         return await self._request(
             "DELETE", f"/v1/instances/{instance_id}/strace"
         )
+
+    async def get_core_trace(
+        self, instance_id: str, lines: int = 1000
+    ) -> str:
+        data = await self._request(
+            "GET",
+            f"/v1/instances/{instance_id}/strace",
+            params={"lines": lines},
+            raw_response=True,
+        )
+        if isinstance(data, bytes):
+            return data.decode("utf-8", errors="replace")
+        return str(data)
 
     # ------------------------------------------------------------------
     # Hypervisor hooks

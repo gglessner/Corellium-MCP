@@ -253,6 +253,14 @@ class Database:
         conn.commit()
         return cursor.lastrowid
 
+    def get_message(self, message_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single message by its ID."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM messages WHERE id=?", (message_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def query_messages(self, instance_id: str = None, connection_id: int = None,
                        direction: str = None, limit: int = 50, offset: int = 0,
                        order: str = "ASC") -> List[Dict[str, Any]]:

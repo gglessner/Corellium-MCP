@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import plistlib
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -443,9 +444,12 @@ async def corellium_agent_ready(
         connection_id: Which connection to use.
     """
     client = _get_client(connection_id)
-    result = await client.agent_ready(instance_id)
-    ready = result.get("ready", False)
-    return f"Agent ready: {ready}"
+    try:
+        result = await client.agent_ready(instance_id)
+        ready = result.get("ready", result.get("status") == "ok")
+        return f"Agent ready: {ready}"
+    except Exception as e:
+        return f"Agent ready: False ({e})"
 
 
 # =====================================================================
@@ -546,9 +550,124 @@ async def corellium_kill_app(
     return _summarize(result)
 
 
+@mcp.tool()
+async def corellium_disable_ssl_pinning(
+    instance_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Disable SSL certificate pinning on the virtual device.
+
+    This uses the Corellium agent's built-in SSL pinning bypass
+    which operates at the OS level. Extremely useful for MITM
+    proxy-based traffic interception during security testing.
+
+    Args:
+        instance_id: The instance UUID.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.disable_ssl_pinning(instance_id)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_enable_ssl_pinning(
+    instance_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Re-enable SSL certificate pinning on the virtual device.
+
+    Args:
+        instance_id: The instance UUID.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.enable_ssl_pinning(instance_id)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_shell_exec(
+    instance_id: str,
+    command: str,
+    connection_id: str = "default",
+) -> str:
+    """Execute a shell command on the virtual device.
+
+    Runs a command on the device and returns its output.
+    Requires the device to be jailbroken/rooted.
+
+    Args:
+        instance_id: The instance UUID.
+        command: Shell command to execute (e.g. "ls -la /tmp").
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.shell_exec(instance_id, command)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_start_network_monitor(
+    instance_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Start the network monitor (sslsplit) on the virtual device.
+
+    Captures all network traffic including TLS-intercepted streams.
+    Use corellium_download_pcap to retrieve the capture file.
+
+    Args:
+        instance_id: The instance UUID.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.start_network_monitor(instance_id)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_stop_network_monitor(
+    instance_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Stop the network monitor on the virtual device.
+
+    Args:
+        instance_id: The instance UUID.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.stop_network_monitor(instance_id)
+    return _summarize(result)
+
+
 # =====================================================================
 # File operations (jailbroken/rooted filesystem access)
 # =====================================================================
+
+
+@mcp.tool()
+async def corellium_list_files(
+    instance_id: str,
+    path: str,
+    connection_id: str = "default",
+) -> str:
+    """List files and directories at a path on the virtual device.
+
+    The device must be jailbroken/rooted for full filesystem access.
+    Use this to browse app bundles, data containers, and system
+    directories when searching for configuration files, plists,
+    databases, and other artifacts.
+
+    Args:
+        instance_id: The instance UUID.
+        path: Directory path on the device (e.g. /private/var/containers/Bundle/Application/).
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.list_files(instance_id, path)
+    return _summarize(result)
 
 
 @mcp.tool()
@@ -595,7 +714,7 @@ async def corellium_download_file(
     client = _get_client(connection_id)
     data = await client.download_file(instance_id, device_path)
     b64 = base64.b64encode(data).decode("ascii")
-    return f"Downloaded {len(data)} bytes from {device_path}.\nBase64: {b64[:2000]}{'...' if len(b64) > 2000 else ''}"
+    return f"Downloaded {len(data)} bytes from {device_path}.\nBase64: {b64}"
 
 
 @mcp.tool()
@@ -614,6 +733,67 @@ async def corellium_delete_file(
     client = _get_client(connection_id)
     await client.delete_file(instance_id, device_path)
     return f"Deleted {device_path}."
+
+
+@mcp.tool()
+async def corellium_find_app_data_container(
+    instance_id: str,
+    bundle_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Find the data container UUID and path for an iOS app by bundle ID.
+
+    Scans /var/mobile/Containers/Data/Application/ and reads each
+    container's metadata plist to find the one matching the given
+    bundle identifier.  Returns the UUID, common sub-paths (Library,
+    Documents, tmp), and the container metadata.
+
+    Args:
+        instance_id: The instance UUID.
+        bundle_id: The app bundle identifier (e.g. com.example.app).
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    base = "/var/mobile/Containers/Data/Application"
+    listing = await client.list_files(instance_id, base)
+    entries = listing.get("entries", []) if isinstance(listing, dict) else listing
+
+    for entry in entries:
+        name = entry.get("name", "")
+        if len(name) != 36 or name.count("-") != 4:
+            continue
+        meta_path = f"{base}/{name}/.com.apple.mobile_container_manager.metadata.plist"
+        try:
+            raw = await client.download_file(instance_id, meta_path)
+            plist = plistlib.loads(raw)
+            identifier = plist.get("MCMMetadataIdentifier", "")
+            if identifier == bundle_id:
+                container = f"{base}/{name}"
+                return json.dumps({
+                    "found": True,
+                    "bundle_id": bundle_id,
+                    "uuid": name,
+                    "data_container": container,
+                    "paths": {
+                        "preferences": f"{container}/Library/Preferences",
+                        "caches": f"{container}/Library/Caches",
+                        "documents": f"{container}/Documents",
+                        "tmp": f"{container}/tmp",
+                        "splash_board": f"{container}/Library/SplashBoard",
+                    },
+                }, indent=2)
+        except Exception:
+            continue
+
+    return json.dumps({
+        "found": False,
+        "bundle_id": bundle_id,
+        "containers_scanned": len([
+            e for e in entries
+            if len(e.get("name", "")) == 36 and e.get("name", "").count("-") == 4
+        ]),
+        "error": "No data container found for this bundle ID.",
+    }, indent=2)
 
 
 # =====================================================================
@@ -873,6 +1053,43 @@ async def corellium_stop_core_trace(
     client = _get_client(connection_id)
     await client.stop_core_trace(instance_id)
     return "CoreTrace stopped."
+
+
+@mcp.tool()
+async def corellium_get_core_trace(
+    instance_id: str,
+    lines: int = 1000,
+    pid_filter: str = "",
+    connection_id: str = "default",
+) -> str:
+    """Retrieve CoreTrace (syscall trace) data from the virtual device.
+
+    Downloads captured syscall trace lines. Use pid_filter to isolate
+    a specific process. Pair with corellium_start_core_trace /
+    corellium_stop_core_trace.
+
+    Args:
+        instance_id: The instance UUID.
+        lines: Number of trace lines to retrieve (default: 1000).
+        pid_filter: Optional PID to filter for (shows only matching lines).
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    data = await client.get_core_trace(instance_id, lines=lines)
+
+    if pid_filter:
+        filtered = [
+            line for line in data.splitlines()
+            if f"[pid {pid_filter}]" in line or line.startswith(f"{pid_filter} ")
+        ]
+        return (
+            f"CoreTrace ({len(filtered)} lines matching PID {pid_filter} "
+            f"out of {len(data.splitlines())} total):\n"
+            + "\n".join(filtered[:lines])
+        )
+
+    total = len(data.splitlines())
+    return f"CoreTrace ({total} lines):\n{data}"
 
 
 @mcp.tool()
@@ -1240,6 +1457,205 @@ async def corellium_uninstall_profile(
     """
     client = _get_client(connection_id)
     result = await client.uninstall_profile(instance_id, profile_id)
+    return _summarize(result)
+
+
+# =====================================================================
+# SSH execution
+# =====================================================================
+
+@mcp.tool()
+async def corellium_ssh_exec(
+    instance_id: str,
+    command: str,
+    username: str = "root",
+    password: str = "alpine",
+    timeout: int = 30,
+    connection_id: str = "default",
+) -> str:
+    """Execute a shell command on the device via SSH.
+
+    Connects to the device over SSH and runs the command. This is the
+    preferred method for shell execution on jailbroken/rooted devices
+    since the REST shell_exec endpoint uses the WebSocket agent protocol.
+
+    Automatically ensures port 22 is exposed before connecting.
+
+    Common uses:
+    - Run keychain-dumper to extract keychain items
+    - Run FRIDA scripts (frida -U ...)
+    - Launch/kill apps via command line
+    - List processes, inspect filesystem, run any tool
+
+    Args:
+        instance_id: The instance UUID.
+        command: Shell command to execute (e.g. "ls -la /tmp").
+        username: SSH username (default: root).
+        password: SSH password (default: alpine).
+        timeout: Command timeout in seconds.
+        connection_id: Which connection to use.
+    """
+    try:
+        import paramiko
+    except ImportError:
+        return (
+            "ERROR: paramiko is required for SSH access.\n"
+            "Install with: pip install paramiko"
+        )
+
+    client = _get_client(connection_id)
+
+    try:
+        await client.enable_expose_port(
+            instance_id, {"port": 22, "protocol": "tcp"}
+        )
+    except Exception:
+        pass
+
+    try:
+        info = await client.get_instance(instance_id)
+    except Exception as exc:
+        return f"ERROR: Cannot get instance info: {exc}"
+
+    domain_name = info.get("domainName")
+    ssh_host = info.get("serviceIp")
+    ssh_port = 22
+    using_internal_ip = True
+
+    services = info.get("services", {})
+    vpn = services.get("vpn", {})
+    for proxy in vpn.get("proxy", []):
+        if proxy.get("devicePort") == 22:
+            if proxy.get("exposedPort"):
+                ssh_host = domain_name or ssh_host
+                ssh_port = proxy["exposedPort"]
+                using_internal_ip = False
+            break
+
+    if not ssh_host:
+        ssh_host = vpn.get("ip") or info.get("ip")
+    if not ssh_host:
+        return "ERROR: Cannot determine device IP address from instance info"
+
+    if using_internal_ip:
+        try:
+            test_sock = __import__("socket").create_connection(
+                (ssh_host, ssh_port), timeout=5,
+            )
+            test_sock.close()
+        except OSError:
+            return (
+                f"ERROR: SSH host {ssh_host}:{ssh_port} is unreachable.\n"
+                f"The device serviceIp ({ssh_host}) is on the Corellium "
+                f"internal network and requires VPN access.\n"
+                f"No externally exposed port for SSH (22) was found.\n\n"
+                f"Options:\n"
+                f"  1. Connect via Corellium VPN first\n"
+                f"  2. Use corellium_enable_port to expose port 22 "
+                f"(may be restricted by enterprise policy)\n"
+                f"  3. Use the Corellium web UI SSH console"
+            )
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        ssh.connect(
+            hostname=ssh_host,
+            port=ssh_port,
+            username=username,
+            password=password,
+            timeout=timeout,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+        _, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        exit_code = stdout.channel.recv_exit_status()
+    except Exception as exc:
+        return f"ERROR: SSH connection failed: {exc}"
+    finally:
+        ssh.close()
+
+    result = f"Exit code: {exit_code}\n"
+    if out:
+        result += f"stdout:\n{out}\n"
+    if err:
+        result += f"stderr:\n{err}\n"
+    return result
+
+
+# =====================================================================
+# Input injection / UI automation
+# =====================================================================
+
+@mcp.tool()
+async def corellium_inject_input(
+    instance_id: str,
+    input_json: str,
+    connection_id: str = "default",
+) -> str:
+    """Inject touch/keyboard input into the virtual device.
+
+    Enables UI automation by sending tap, swipe, and key events.
+    Useful for exercising app features during dynamic testing when
+    programmatic app control is unavailable.
+
+    Input format examples:
+      Tap:   {"type": "touchDown", "x": 200, "y": 400}
+             {"type": "touchUp", "x": 200, "y": 400}
+      Key:   {"type": "keyDown", "keyCode": 4}  (Android back)
+      Text:  {"type": "text", "text": "hello"}
+
+    Args:
+        instance_id: The instance UUID.
+        input_json: JSON object describing the input event.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    body = json.loads(input_json)
+    result = await client.inject_input(instance_id, body)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_set_hostname(
+    instance_id: str,
+    hostname: str,
+    connection_id: str = "default",
+) -> str:
+    """Set the hostname of the virtual device.
+
+    Useful for device fingerprinting tests — change the hostname
+    and observe if the app behaves differently.
+
+    Args:
+        instance_id: The instance UUID.
+        hostname: New hostname to set.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.set_hostname(instance_id, hostname)
+    return _summarize(result)
+
+
+@mcp.tool()
+async def corellium_system_shutdown(
+    instance_id: str,
+    connection_id: str = "default",
+) -> str:
+    """Gracefully shut down the virtual device OS.
+
+    Sends a shutdown command to the device agent. The instance
+    remains allocated but the OS stops. Use corellium_start_instance
+    to boot it again.
+
+    Args:
+        instance_id: The instance UUID.
+        connection_id: Which connection to use.
+    """
+    client = _get_client(connection_id)
+    result = await client.system_shutdown(instance_id)
     return _summarize(result)
 
 

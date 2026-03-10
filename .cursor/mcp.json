@@ -4,13 +4,17 @@
       "command": "python",
       "args": ["-m", "corellium_mcp.server"],
       "env": {
-        "CORELLIUM_API_ENDPOINT": "",
-        "CORELLIUM_API_TOKEN": ""
+        "CORELLIUM_API_ENDPOINT": "https://YOUR_DOMAIN.enterprise.corellium.com/api",
+        "CORELLIUM_API_TOKEN": "YOUR_API_TOKEN_HERE"
       }
     },
     "parley-mcp": {
       "command": "python",
       "args": ["Parley-MCP/run_server.py"]
+    },
+    "analysis-mcp": {
+      "command": "python",
+      "args": ["-m", "analysis_mcp.server"]
     }
   }
 }
