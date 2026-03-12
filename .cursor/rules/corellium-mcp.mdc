@@ -1,0 +1,40 @@
+---
+description: Corellium MCP usage patterns and API quirks learned from testing
+alwaysApply: true
+---
+
+# Corellium MCP Usage
+
+## MATRIX Assessment Workflow
+
+The correct MATRIX assessment sequence is:
+1. `corellium_connect` (reads env vars if no args)
+2. `corellium_create_assessment` — **must include `instanceId` in the request body** (the MCP server.py has been patched for this)
+3. `corellium_start_monitoring`
+4. `corellium_run_app` + interact with the app
+5. `corellium_stop_monitoring` — wait for status `readyForTesting` before proceeding
+6. `corellium_run_security_tests` — poll `corellium_get_assessment` until status is `complete` (~2-5 min)
+7. `corellium_download_security_report` — returns base64 HTML report
+
+## Android Devices — Shell Access
+
+- **SSH does not work** on Android devices (no sshd installed by default). Use ADB instead.
+- ADB port is on `serviceIp:5001` (from instance `port-adb` field).
+- Run `adb root` to restart adbd as root for accessing `/data/user/0/<pkg>/` directories.
+- The `corellium_shell_exec` REST endpoint returns 404 on this enterprise deployment — use ADB as fallback.
+
+## API Quirks
+
+- `corellium_create_assessment` requires `{"instanceId": "<id>", "bundleId": "<pkg>"}` in the body. The instanceId in the URL path alone is insufficient.
+- When an API returns 400, capture `resp.text` for the real error message (the default httpx `raise_for_status()` loses it).
+- `corellium_list_apps` may return 400 — retry or use ADB `pm list packages` as fallback.
+- `corellium_inject_input` uses `touchDown`/`touchUp` event types, not `touch`. May return 400 on some enterprise configs — use ADB `input tap` as fallback.
+
+## Data Gathering Checklist (Android)
+
+Via ADB root shell:
+- `pm dump <pkg>` — permissions, components, signatures
+- `ls -laR /data/user/0/<pkg>/` — app data files
+- `cat /data/user/0/<pkg>/shared_prefs/*.xml` — shared preferences
+- `logcat -d --pid=<PID>` — app log output (check for sensitive data leaks)
+- `dumpsys package <pkg>` — full package info (versionName, targetSdk, codePath)

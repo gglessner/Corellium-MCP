@@ -1222,7 +1222,7 @@ async def corellium_create_assessment(
         connection_id: Which connection to use.
     """
     client = _get_client(connection_id)
-    body: dict[str, Any] = {}
+    body: dict[str, Any] = {"instanceId": instance_id}
     if bundle_id:
         body["bundleId"] = bundle_id
     result = await client.create_assessment(instance_id, body)

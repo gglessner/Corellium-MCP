@@ -59,7 +59,16 @@ class CorelliumClient:
             params=params,
             headers=headers,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            try:
+                detail = resp.text
+            except Exception:
+                detail = repr(resp.content)
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} {resp.reason_phrase}: {detail}",
+                request=resp.request,
+                response=resp,
+            )
 
         if raw_response:
             return resp.content

@@ -1,6 +1,6 @@
 # Corellium-MCP + Parley-MCP
 
-Version: 1.1.0
+Version: 1.1.1
 
 **AI-driven mobile penetration testing** combining [Corellium](https://www.corellium.com/) virtual device control, [Parley-MCP](https://github.com/gglessner/Parley-MCP) active traffic interception, and Analysis-MCP forensic data decoding — all orchestrated by an AI agent through the Model Context Protocol.
 
